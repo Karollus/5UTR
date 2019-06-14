@@ -14,7 +14,7 @@ class FrameSliceLayer(Layer):
         super().__init__(**kwargs)
 
     def build(self, input_shape):
-        super().build(input_shape)  # Be sure to call this at the end
+        super().build(input_shape) 
     
     def call(self, x):
         shape = K.shape(x)
@@ -48,29 +48,29 @@ def global_avg_pool_masked(input_tensors):
     mask = input_tensors[1]
     mask = K.expand_dims(mask, axis=2)
     mask = K.repeat_elements(mask, rep=K.int_shape(tensor)[2], axis=2)
-    return K.sum(tensor, axis=2)/K.sum(mask, axis=1)
+    return K.sum(tensor, axis=1)/K.sum(mask, axis=1)
 
-def convolve_and_mask(conv_features, n_filters, kernel_size, dilation=0, suffix):
-    conv_features = Conv1D(filters=n_filters[i], kernel_size=kernel_size, dilation_rate=dilation, activation='relu', 
+def convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size, suffix, dilation=1):
+    conv_features = Conv1D(filters=n_filters, kernel_size=kernel_size, dilation_rate=dilation, activation='relu', 
                            padding="causal", name="convolution_"+suffix)(conv_features)
     conv_features = Lambda(apply_pad_mask, name="apply_pad_mask_"+suffix)([conv_features, pad_mask]) # Mask padding
     return conv_features
 
-def inception_block(n_filters, suffix):
+def inception_block(conv_features, pad_mask, n_filters, suffix):
     conv_features_3 = convolve_and_mask(conv_features, n_filters[0], 3, suffix="incept3_"+suffix)
     conv_features_5 = convolve_and_mask(conv_features, n_filters[1], 5, suffix="incept5_"+suffix)
     conv_features_7 = convolve_and_mask(conv_features, n_filters[2], 7, suffix="incept7_"+suffix)
     conv_features = Concatenate(name="incept_concat"+suffix)()
     return conv_features
 
-def create_model_masked_bordered(n_conv_layers, 
+def create_model_masked_bordered(n_conv_layers=3, 
                         kernel_size=[8,8,8], n_filters=128, dilations=[1, 1, 1],
                         use_inception=False, skip_connections="", 
                         fc_neurons=64, fc_drop_rate=0.2,
                         extract_tis_context=False):
     # Inputs
     input_seq = Input(shape=(None, 4), name="input_seq")
-    input_experiment = Input(shape=(5, ), name="input_experiment")
+    input_experiment = Input(shape=(6, ), name="input_experiment")
     conv_features = input_seq
     # Compute presence of zero padding
     pad_mask = Lambda(compute_pad_mask, name="compute_pad_mask")(conv_features)
@@ -78,7 +78,7 @@ def create_model_masked_bordered(n_conv_layers,
     for i in range(n_conv_layers):
         if skip_connections:
             conv_features_shortcut = conv_features
-        conv_features = convolve_and_mask(conv_features, n_filters, kernel_size[i], suffix=str(i))   
+        conv_features = convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size[i], suffix=str(i))   
         if skip_connections == "residual":
             conv_features = Add()([conv_features, conv_features_shortcut])
         elif skip_connections == "dense":
