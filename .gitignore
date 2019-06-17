@@ -3,3 +3,4 @@
 *.pkl
 *.ipynb_checkpoints
 *.pyc
+*.h5

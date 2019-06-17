@@ -69,9 +69,12 @@ def freeze_all_except_scaling(model):
     model.compile(loss='mean_squared_error', optimizer=adam)
     return model
 
-def retrain_only_scaling(model, data, batch_size=128, epochs=2):
+def retrain_only_scaling(model, 
+                         data, 
+                         libraries = ['egfp_unmod_1', 'mcherry_1', 'mcherry_2', 'egfp_unmod_2', 'ga'], 
+                         batch_size=128, 
+                         epochs=2):
     model = freeze_all_except_scaling(model)
-    libraries = ['egfp_unmod_1', 'mcherry_1', 'mcherry_2', 'egfp_unmod_2', 'ga']
     inputs = [np.concatenate([data["train"][library]["seq"] for library in libraries] + [data["val"]["human"]["seq"]]), 
               np.concatenate([data["train"][library]["library"] for library in libraries] + [data["val"]["human"]["library"]])]
     outputs = np.concatenate([data["train"][library]["rl"] for library in libraries] + [data["val"]["human"]["rl"]])
@@ -118,19 +121,26 @@ def plot(evaluation):
 def eval_snv(model, data, snv_df):
     preds = []
     for library in ["snv", "wt"]:
-        inputs = [data["library"]["seq"], data["library"]["indicator"]]
+        inputs = [data[library]["seq"], data[library]["library"]]
         predictions = model.predict(inputs)
         preds.append(predictions)
-        print("Rsquared " + library + " : " + str(rSquared(predictions, data[library]["rl"])))
-    log_pred_diff = np.log2(preds[0]/pres[1])
+        print("Pearson " + library + " : " + str(pearson_r(predictions.reshape(-1), data[library]["rl"].reshape(-1))[0]))
+    log_pred_diff = np.log2(preds[0]/preds[1])
     snv_df["log_pred_diff_new"] =  log_pred_diff.reshape(-1)
-    print("Rsquared fold-change: " + rSquared(snv_df["log_pred_diff_new"], snv_df["log_obs_diff"]))
-    return preds
+    print("Rsquared fold-change: " + str(rSquared(snv_df["log_pred_diff_new"], snv_df["log_obs_diff"])))
 
-def plot_snv(snv_df, path, benign, unsure):
+def plot_snv(snv_df):
     f, ax = plt.subplots()
     f.set_size_inches((10,10))
     point_size = 40
+    sub = snv_df
+    path_list = ['Pathogenic', 'Likely pathogenic', 'Pathogenic, other', 'Pathogenic/Likely pathogenic']
+    benign_list = ['Benign/Likely benign', 'Benign', 'Likely Benign']
+    uncertain_list = ['Conflicting interpretations of pathogenicity', 'Uncertain significance']
+    path = sub[(sub['clin_sig'] == path_list[0]) | (sub['clin_sig'] == path_list[1]) |
+           (sub['clin_sig'] == path_list[2]) | (sub['clin_sig'] == path_list[3])]
+    non = sub[(sub['clin_sig'] == benign_list[0]) | (sub['clin_sig'] == benign_list[1]) | (sub['clin_sig'] == benign_list[2])]
+    unsure = sub[(sub['clin_sig'] == uncertain_list[0]) | (sub['clin_sig'] == uncertain_list[1])]
     ax.scatter(unsure['log_obs_diff'], unsure['log_pred_diff_new'], alpha=0.8, color='grey', label='Uncertain',
                linewidth=1, edgecolors='k', s=point_size)
     ax.scatter(non['log_obs_diff'], non['log_pred_diff_new'], alpha=0.8, color='dodgerblue', label='Benign / likely',
@@ -150,8 +160,11 @@ def plot_snv(snv_df, path, benign, unsure):
     ax.yaxis.set_ticks_position('left')
 
 def eval_ptr(model, data, ptr_df):
-    
-    stats.pearsonr(df["MRL"],df["PTR"])
+    inputs = [data["seq"], data["library"]]
+    predictions = model.predict(inputs)
+    ptr_df["MRL"] = predictions.reshape(-1)
+    pearson = pearson_r(ptr_df["MRL"],ptr_df["PTR"])
+    print("PTR Pearson: " + str(pearson[0]) + " p-val: " + str(pearson[1]))
     
     
 """ DEBUG """

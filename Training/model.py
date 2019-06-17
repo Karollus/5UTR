@@ -1,7 +1,7 @@
 import numpy as np
 import keras
 
-from keras.layers import Input, Dense, Conv1D, GlobalMaxPooling1D, GlobalAveragePooling1D, Dropout, Concatenate, Lambda, Flatten, ZeroPadding1D, MaxPooling1D, BatchNormalization, ThresholdedReLU, Masking
+from keras.layers import Input, Dense, Conv1D, GlobalMaxPooling1D, GlobalAveragePooling1D, Dropout, Concatenate, Lambda, Flatten, ZeroPadding1D, MaxPooling1D, BatchNormalization, ThresholdedReLU, Masking, Add
 from keras.models import Model
 from keras.layers import Layer
 from keras import losses
@@ -57,16 +57,17 @@ def convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size, suffix, d
     return conv_features
 
 def inception_block(conv_features, pad_mask, n_filters, suffix):
-    conv_features_3 = convolve_and_mask(conv_features, n_filters[0], 3, suffix="incept3_"+suffix)
-    conv_features_5 = convolve_and_mask(conv_features, n_filters[1], 5, suffix="incept5_"+suffix)
-    conv_features_7 = convolve_and_mask(conv_features, n_filters[2], 7, suffix="incept7_"+suffix)
-    conv_features = Concatenate(name="incept_concat"+suffix)()
+    conv_features_3 = convolve_and_mask(conv_features, pad_mask, n_filters[0], kernel_size=3, suffix="incept3_"+suffix)
+    conv_features_5 = convolve_and_mask(conv_features, pad_mask, n_filters[1], kernel_size=5, suffix="incept5_"+suffix)
+    conv_features_7 = convolve_and_mask(conv_features, pad_mask, n_filters[2], kernel_size=7, suffix="incept7_"+suffix)
+    conv_features = Concatenate(name="incept_concat"+suffix)([conv_features_3, conv_features_5, conv_features_7])
     return conv_features
 
 def create_model_masked_bordered(n_conv_layers=3, 
                         kernel_size=[8,8,8], n_filters=128, dilations=[1, 1, 1],
                         use_inception=False, skip_connections="", 
                         fc_neurons=64, fc_drop_rate=0.2,
+                        loss = 'mean_squared_error',
                         extract_tis_context=False):
     # Inputs
     input_seq = Input(shape=(None, 4), name="input_seq")
@@ -78,11 +79,14 @@ def create_model_masked_bordered(n_conv_layers=3,
     for i in range(n_conv_layers):
         if skip_connections:
             conv_features_shortcut = conv_features
-        conv_features = convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size[i], suffix=str(i))   
-        if skip_connections == "residual":
-            conv_features = Add()([conv_features, conv_features_shortcut])
+        if use_inception:
+            conv_features = inception_block(conv_features, pad_mask, n_filters, suffix=str(i))   
+        else:
+            conv_features = convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size[i], suffix=str(i), dilation=dilations[i])   
+        if skip_connections == "residual" and i > 0:
+            conv_features = Add(name="add_residual_"+str(i))([conv_features, conv_features_shortcut])
         elif skip_connections == "dense":
-            conv_features = Concatenate(axis=-1)([conv_features, conv_features_shortcut])
+            conv_features = Concatenate(axis=-1, name="concat_dense_"+str(i))([conv_features, conv_features_shortcut])
     # Extract out area before TIS
     tis_conv = []
     if extract_tis_context:
@@ -117,5 +121,5 @@ def create_model_masked_bordered(n_conv_layers=3,
     inputs = [input_seq, input_experiment]
     model = Model(inputs=inputs, outputs=predict)
     adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
-    model.compile(loss='mean_squared_error', optimizer=adam)
+    model.compile(loss=loss, optimizer=adam)
     return model
