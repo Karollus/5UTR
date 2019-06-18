@@ -66,7 +66,7 @@ def inception_block(conv_features, pad_mask, n_filters, suffix):
 def create_model_masked_bordered(n_conv_layers=3, 
                         kernel_size=[8,8,8], n_filters=128, dilations=[1, 1, 1],
                         use_inception=False, skip_connections="", 
-                        fc_neurons=64, fc_drop_rate=0.2,
+                        n_dense_layers=1, fc_neurons=[64], fc_drop_rate=0.2,
                         loss = 'mean_squared_error',
                         extract_tis_context=False):
     # Inputs
@@ -110,8 +110,10 @@ def create_model_masked_bordered(n_conv_layers=3,
     else:
         concat_features = feature_list[0]
     # Prediction (Dense layer)
-    predict = Dense(fc_neurons, activation='relu', name="fully_connected")(concat_features)
-    predict = Dropout(rate=fc_drop_rate, name="fc_dropout")(predict)
+    predict = concat_features
+    for i in range(n_dense_layers):
+        predict = Dense(fc_neurons[i], activation='relu', name="fully_connected_"+str(i))(predict)
+        predict = Dropout(rate=fc_drop_rate, name="fc_dropout_"+str(i))(predict)
     predict = Dense(1, name="mrl_output_unscaled")(predict) 
     # Scaling regression
     predict = Lambda(interaction_term, name="interaction_term")([predict, input_experiment])

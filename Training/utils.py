@@ -1,3 +1,6 @@
+import random
+import re
+
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
@@ -47,7 +50,7 @@ def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=Fal
 
 """ TRAINING """
 
-def train(model, data, libraries, batch_size=128, epochs=3, use_val=True, early_stop=True, file="best_model.h5"):
+def train(model, data, libraries, batch_size=128, epochs=3, use_val=True, early_stop=True, patience=3, file="best_model.h5"):
     inputs = [np.concatenate([data["train"][library]["seq"] for library in libraries]), 
               np.concatenate([data["train"][library]["library"] for library in libraries])]
     outputs = np.concatenate([data["train"][library]["rl"] for library in libraries])
@@ -57,9 +60,9 @@ def train(model, data, libraries, batch_size=128, epochs=3, use_val=True, early_
                   np.concatenate([data["val"][library]["library"] for library in val_libs])]
         val_outputs = np.concatenate([data["val"][library]["rl"] for library in val_libs])
     if early_stop:
-        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
+        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=patience)
         mc = ModelCheckpoint(file, monitor='val_loss', mode='min', verbose=1, save_best_only=True)
-    model.fit(inputs, outputs, batch_size, epochs, verbose=1, validation_data=(val_inputs, val_outputs), callbacks=[es, mc])
+    model.fit(inputs, outputs, batch_size, epochs, verbose=2, validation_data=(val_inputs, val_outputs), callbacks=[es, mc])
         
 def freeze_all_except_scaling(model):
     for layer in model.layers:
@@ -78,7 +81,7 @@ def retrain_only_scaling(model,
     inputs = [np.concatenate([data["train"][library]["seq"] for library in libraries] + [data["val"]["human"]["seq"]]), 
               np.concatenate([data["train"][library]["library"] for library in libraries] + [data["val"]["human"]["library"]])]
     outputs = np.concatenate([data["train"][library]["rl"] for library in libraries] + [data["val"]["human"]["rl"]])
-    model.fit(inputs, outputs, batch_size, epochs, verbose=1)
+    model.fit(inputs, outputs, batch_size, epochs, verbose=2)
     return model
 
 """ EVALUATION """
@@ -108,15 +111,16 @@ def evaluate(model, data, libraries, do_test=False):
     #predictions_array = np.concatenate([])
     #return pd.DataFrame({"predicted": predictions_array, "actual": outputs})
 
-def plot(evaluation):
+def plot(df, x_name='predicted', y_name="actual", add_line=True):
     c1 = (0.3, 0.45, 0.69)
     c2 = 'r'
-    g = sns.JointGrid(x='predicted', y="actual", data=evaluation, space=0, xlim=(0,10), ylim=(0,10), ratio=6, height=8)
+    g = sns.JointGrid(x=x_name,y=y_name, data=df, space=0, ratio=6, height=8)
     g.plot_joint(plt.scatter,s=20, color=c1, linewidth=0.2, alpha='0.5', edgecolor='white')
     f = g.fig
     ax = f.gca()
-    x = np.linspace(*ax.get_xlim())
-    plt.plot(x, x)
+    if add_line:
+        x = np.linspace(*ax.get_xlim())
+        plt.plot(x, x)
 
 def eval_snv(model, data, snv_df):
     preds = []
@@ -127,7 +131,7 @@ def eval_snv(model, data, snv_df):
         print("Pearson " + library + " : " + str(pearson_r(predictions.reshape(-1), data[library]["rl"].reshape(-1))[0]))
     log_pred_diff = np.log2(preds[0]/preds[1])
     snv_df["log_pred_diff_new"] =  log_pred_diff.reshape(-1)
-    print("Rsquared fold-change: " + str(rSquared(snv_df["log_pred_diff_new"], snv_df["log_obs_diff"])))
+    print("Rsquared fold-change: " + str(pearson_r(snv_df["log_pred_diff_new"], snv_df["log_obs_diff"])[0]))
 
 def plot_snv(snv_df):
     f, ax = plt.subplots()
@@ -193,7 +197,7 @@ def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=100
         # Remove existing atg
         atg_present = [m.start() for m in re.finditer('ATG', seq)]
         for idx in atg_present:
-            seq = seq[:idx] + ''.join(random.choices(["C","T","G"], k=seq_length)) + seq[idx+3:]
+            seq = seq[:idx] + ''.join(random.choices(["C","T","G"], k=3)) + seq[idx+3:]
         # Iterate over all possible atg/kozak locations
         uAUG_seqs = []
         if kozak:
@@ -201,16 +205,16 @@ def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=100
                 new_seq = seq
                 new_seq = new_seq[:i] + "GCCACCATG" + new_seq[i+9:] 
                 uAUG_seqs.append(new_seq)
-            df = pd.DataFrame({"utr": uAUG_seqs})
+            df = pd.DataFrame({"utr": uAUG_seqs, "library":"egfp_unmod_1"})
         else:
             for i in range(len(seq) - 2):
                 new_seq = seq
                 new_seq = new_seq[:i] + "ATG" + new_seq[i+3:] 
                 uAUG_seqs.append(new_seq)
-            df = pd.DataFrame({"utr": uAUG_seqs})
+            df = pd.DataFrame({"utr": uAUG_seqs, "library":"egfp_unmod_1"})
         # Predict
-        data = utils.encode_fromdf(df, 0)
-        predictions.append(trained_model.predict([data["seq"], data["indicator"]]))
+        data = encode_df(df, output_col=None)
+        predictions.append(trained_model.predict([data["seq"], data["library"]]))
     #get average prediction
     out_df["prediction"] = (sum(predictions)/samples).reshape(-1)
     return out_df
