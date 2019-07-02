@@ -4,3 +4,4 @@
 *.ipynb_checkpoints
 *.pyc
 *.h5
+!basic_model_scaled.h5

@@ -8,6 +8,7 @@ from keras import losses
 from keras import backend as K
 import tensorflow as tf
 
+# Layer which slices input tensor into three tensors, one for each frame w.r.t. the canonical start
 class FrameSliceLayer(Layer):
     
     def __init__(self, **kwargs):
@@ -26,13 +27,15 @@ class FrameSliceLayer(Layer):
     
     def compute_output_shape(self, input_shape):
         return [(input_shape[0], None, input_shape[2]),(input_shape[0], None, input_shape[2]),(input_shape[0], None, input_shape[2])]
-           
+
+# Function to compute an interaction term between a value and a one-hot vector
 def interaction_term(tensors):
     prediction = tensors[0]
     experiment_indicator = tensors[1]
     prediction = K.repeat_elements(prediction, rep=K.int_shape(experiment_indicator)[1], axis=1)
     return K.tf.multiply(prediction, experiment_indicator)
 
+# Masking to prevent zero padding to influence results
 def compute_pad_mask(x):
     return K.sum(x, axis=2)
 
@@ -43,6 +46,7 @@ def apply_pad_mask(input_tensors):
     mask = K.repeat_elements(mask, rep=K.int_shape(tensor)[2], axis=2)
     return K.tf.multiply(tensor, mask)
 
+# Average pooling that accounts for masking
 def global_avg_pool_masked(input_tensors):
     tensor = input_tensors[0]
     mask = input_tensors[1]
@@ -78,7 +82,7 @@ def create_model_masked_bordered(n_conv_layers=3,
     # Convolution
     for i in range(n_conv_layers):
         if skip_connections:
-            conv_features_shortcut = conv_features
+            conv_features_shortcut = conv_features #shortcut connections
         if use_inception:
             conv_features = inception_block(conv_features, pad_mask, n_filters, suffix=str(i))   
         else:
