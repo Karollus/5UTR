@@ -1,1 +1,7 @@
 # 5UTR
+
+In the paper "Human 5′ UTR design and variant effect prediction from a massively parallel translation assay" (Sample et al), MPRA data is used to train a powerful deep model to predict ribsome load (a measure of translation efficiency) from the seuqnece of the 5 untranslated region. This model can be used to predict the effect of variants (mutations) on the ribosome load (and thus translation efficiency), which could be used to investigate the causes of rare genetic dieseases.
+
+However, the published model, due to its use of a dense layer in the architecture, is inherently limited to specific sequence lengths. We attempt to remove this restriction and allow the model to produce predictions for arbitrary length sequences. To achieve this, we replace the dense layer with global max and average pooling operations on the output of the convolutional layers to provide an aggregated record of which sequence motifs were detected. In order to differentiate in which frame a motif is found (which may play a role for some motifs, such as upstream AUG), we perform these pooling operations on each frame seperately. Only then is the pooled motif data fed into a dense layer.
+
+We show that such a model can provide similar performance as the published fixed-length on the same test set, while generalizing somewhat better to other contexts, such as protein-to-mrna ratio data and ribosome profiling data.
