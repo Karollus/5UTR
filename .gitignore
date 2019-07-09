@@ -1,5 +1,6 @@
 *.csv
 *.tsv
+*.fasta
 *.pkl
 *.ipynb_checkpoints
 *.pyc

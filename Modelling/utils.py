@@ -21,7 +21,6 @@ nuc_dict = {'a':[1.0,0.0,0.0,0.0],'c':[0.0,1.0,0.0,0.0],'g':[0.0,0.0,1.0,0.0], '
 # Dictionary encoding the experiments
 experiment_dict = {"egfp_unmod_1":0, "egfp_unmod_2": 1, "mcherry_1":2, "mcherry_2":3, "ga": 4, "human":5} 
 
-
 def encode_seq(seq, max_len=0):
     length = len(seq)
     if max_len > 0:
@@ -37,7 +36,7 @@ def encode_experiment(df, col="library"):
     indicator[np.arange(len(df)), mask] = 1
     return indicator
 
-def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=False):
+def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=False, tis_col=None):
     max_len = 0
     if variable_len:
         max_len = len(max(df[col], key=len))
@@ -46,18 +45,47 @@ def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=Fal
     rl = None
     if output_col is not None:
         rl = np.array(df[output_col])
-    return {"seq":one_hot, "library":indicator, "rl":rl}
+    tis_one_hot = None
+    if tis_col is not None:
+        tis_one_hot = np.stack([encode_seq(x) for x in df[tis_col]])
+    return {"seq":one_hot, "library":indicator, "tis":tis_one_hot, "rl":rl}
+
+def extract_tis(df, downstream_nt=6, upstream_nt=2, utr_col="utr", cds_col="CDS_Sequence", new_col="tis", attach_to_utr=False): 
+    # extract upstream
+    up_seq = df[cds_col].str[0:3+upstream_nt]
+    if attach_to_utr:
+        df[utr_col] = df[utr_col].str.cat(others=up_seq)
+    #extract downstream
+    down_seq = df[utr_col].str[-downstream_nt:]
+    tis = down_seq.str.cat(others=up_seq)
+    if new_col is None:
+        return tis
+    else:
+        df[new_col] = tis
+        return df
+
+def build_tis_score_dict(path="../Data/TIS/tis_efficiencies_aug.tsv", seq_col="sequence", score_col="efficiency", replace_u=True):
+    tis_df = pd.read_csv(path, sep='\t')
+    if replace_u:
+        tis_df[seq_col] = tis_df[seq_col].str.replace("U", "T")
+    score_dict = {k:v for k,v in zip(tis_df[seq_col], tis_df[score_col])}
+    return score_dict
 
 """ TRAINING """
 
-def train(model, data, libraries, batch_size=128, epochs=3, use_val=True, early_stop=True, patience=3, file="best_model.h5"):
+def train(model, data, libraries, batch_size=128, epochs=3, use_val=True, early_stop=True, patience=3, file="best_model.h5",
+         extra_keys=[]):
     inputs = [np.concatenate([data["train"][library]["seq"] for library in libraries]), 
               np.concatenate([data["train"][library]["library"] for library in libraries])]
+    if len(extra_keys) > 0:
+        inputs = inputs + [np.concatenate([data["train"][library][key] for library in libraries]) for key in extra_keys]
     outputs = np.concatenate([data["train"][library]["rl"] for library in libraries])
     if use_val:
         val_libs = set(data["val"].keys()) & set(libraries)
         val_inputs = [np.concatenate([data["val"][library]["seq"] for library in val_libs]), 
                   np.concatenate([data["val"][library]["library"] for library in val_libs])]
+        if len(extra_keys) > 0:
+            val_inputs = val_inputs + [np.concatenate([data["val"][library][key] for library in val_libs]) for key in extra_keys]
         val_outputs = np.concatenate([data["val"][library]["rl"] for library in val_libs])
     if early_stop:
         es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=patience)
@@ -76,10 +104,14 @@ def retrain_only_scaling(model,
                          data, 
                          libraries = ['egfp_unmod_1', 'mcherry_1', 'mcherry_2', 'egfp_unmod_2', 'ga'], 
                          batch_size=128, 
-                         epochs=2):
+                         epochs=2,
+                        extra_keys=[]):
     model = freeze_all_except_scaling(model)
     inputs = [np.concatenate([data["train"][library]["seq"] for library in libraries] + [data["val"]["human"]["seq"]]), 
               np.concatenate([data["train"][library]["library"] for library in libraries] + [data["val"]["human"]["library"]])]
+    if len(extra_keys) > 0:
+        inputs = inputs + [np.concatenate([data["train"][library][key] for library in libraries] + [data["val"]["human"][key]]) 
+                                                                                                    for key in extra_keys]
     outputs = np.concatenate([data["train"][library]["rl"] for library in libraries] + [data["val"]["human"]["rl"]])
     model.fit(inputs, outputs, batch_size, epochs, verbose=2)
     return model
@@ -92,17 +124,32 @@ def rSquared(predictions, targets):
     sst = np.sum(np.square(targets - ybar))
     return 1 - (ssr/sst)
 
+def adjust_r2(r2, n, p):
+    return 1-((1-r2)*(n-1)/(n-p-1))
+
 def pearson_r(x, y, squared=True):
     pearson_r, p_val = stats.pearsonr(x, y)
     if squared:
         pearson_r = pearson_r ** 2
     return pearson_r, p_val
 
-def evaluate(model, data, libraries, do_test=False):
+def spearman_r(x, y):
+    return stats.spearmanr(x, y)
+
+def print_corrs(x ,y):
+    pearson = pearson_r(x, y, squared=False)
+    spearman = spearman_r(x, y)
+    print("Pearson: {:.3f}, p-val: {:.3f}, squared: {:.3f}, Spearman: {:.3f}, p-val: {:.3f}"
+          .format(pearson[0], pearson[1], pearson[0] ** 2, spearman[0], spearman[1]))
+
+def evaluate(model, data, libraries, do_test=False,
+            extra_keys=[]):
     set_type = "test" if do_test else "val"
     preds = []
     for library in libraries:
         inputs = [data[set_type][library]["seq"], data[set_type][library]["library"]]
+        if len(extra_keys) > 0:
+            inputs = inputs + [np.concatenate([data[set_type][library][key] for library in libraries]) for key in extra_keys]
         outputs = data[set_type][library]["rl"]
         predict = model.predict(inputs)
         print("Rsquared on set " + library + " : " + str(rSquared(predict.reshape(-1), outputs.reshape(-1))) + \
@@ -122,10 +169,12 @@ def plot(df, x_name='predicted', y_name="actual", add_line=True):
         x = np.linspace(*ax.get_xlim())
         plt.plot(x, x)
 
-def eval_snv(model, data, snv_df):
+def eval_snv(model, data, snv_df, extra_keys=[]):
     preds = []
     for library in ["snv", "wt"]:
         inputs = [data[library]["seq"], data[library]["library"]]
+        if len(extra_keys) > 0:
+            inputs = inputs + [data[library][key] for key in extra_keys]
         predictions = model.predict(inputs)
         preds.append(predictions)
         print("Pearson " + library + " : " + str(pearson_r(predictions.reshape(-1), data[library]["rl"].reshape(-1))[0]))
@@ -163,8 +212,10 @@ def plot_snv(snv_df):
     ax.xaxis.set_ticks_position('bottom')
     ax.yaxis.set_ticks_position('left')
 
-def eval_ptr(model, data, ptr_df):
+def eval_ptr(model, data, ptr_df, extra_keys=[]):
     inputs = [data["seq"], data["library"]]
+    if len(extra_keys) > 0:
+        inputs = inputs + [data[key] for key in extra_keys]
     predictions = model.predict(inputs)
     ptr_df["MRL"] = predictions.reshape(-1)
     pearson = pearson_r(ptr_df["MRL"],ptr_df["PTR"])
@@ -185,7 +236,7 @@ def check_layer(model, data, layer_names, node=0):
         return_dict[name] = check_fn([data["val_input"]["seq"], data["val_input"]["indicator"]])
     return return_dict
 
-def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=1000):
+def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=1000, add_tis=False):
     if kozak:
         out_df = pd.DataFrame({"idx": list(range(-seq_length, -8, 1)), "in_frame": [i % 3 == 0 for i in range(-seq_length, -8, 1)]})
     else:
