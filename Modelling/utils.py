@@ -9,6 +9,7 @@ import keras
 from keras import backend as K
 from keras.models import load_model
 from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.utils import Sequence
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -36,6 +37,19 @@ def encode_experiment(df, col="library"):
     indicator[np.arange(len(df)), mask] = 1
     return indicator
 
+def build_frame(length, n):
+    frame = np.flip(np.arange(0, length))
+    frame = np.transpose(np.array([((frame + shift) % 3 == 0).astype(int) for shift in range(3)]))
+    return np.repeat(frame[np.newaxis,:,:],n,axis=0)
+
+def build_canonical_kozak_indicator(length, n):
+    utr = np.zeros(length)
+    for i in range(6):
+        if i < utr.shape[0]:
+            utr[i] = 1
+    utr = np.flip(utr)
+    return np.repeat(utr[np.newaxis,:],n,axis=0)[:,:,np.newaxis]
+
 def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=False, tis_col=None):
     max_len = 0
     if variable_len:
@@ -48,13 +62,17 @@ def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=Fal
     tis_one_hot = None
     if tis_col is not None:
         tis_one_hot = np.stack([encode_seq(x) for x in df[tis_col]])
-    return {"seq":one_hot, "library":indicator, "tis":tis_one_hot, "rl":rl}
+    frame = build_frame(one_hot.shape[1], one_hot.shape[0])
+    kozak = build_canonical_kozak_indicator(one_hot.shape[1], one_hot.shape[0])
+    return {"seq":one_hot, "library":indicator, "tis":tis_one_hot, "frame":frame, "kozak":kozak, "rl":rl}
 
 def extract_tis(df, downstream_nt=6, upstream_nt=2, utr_col="utr", cds_col="CDS_Sequence", new_col="tis", attach_to_utr=False): 
     # extract upstream
+    df = df.copy()
     up_seq = df[cds_col].str[0:3+upstream_nt]
     if attach_to_utr:
         df[utr_col] = df[utr_col].str.cat(others=up_seq)
+        return df
     #extract downstream
     down_seq = df[utr_col].str[-downstream_nt:]
     tis = down_seq.str.cat(others=up_seq)
@@ -64,6 +82,46 @@ def extract_tis(df, downstream_nt=6, upstream_nt=2, utr_col="utr", cds_col="CDS_
         df[new_col] = tis
         return df
 
+# Generator class for input data (useful to batch small sequences to prevent insane padding)
+class DataSequence(Sequence):
+    
+    def __init__(self, df, col="utr", libcol="library", 
+                 output_col="rl", 
+                 tis_col="tis", 
+                 extra_keys=[], batch_size=128, shuffle=True):
+        self.df = df
+        self.col, self.libcol, self.output_col, self.tis_col = col, libcol, output_col, tis_col
+        self.extra_keys = extra_keys
+        self.indices = np.arange(len(self.df))
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        super().__init__()
+
+    def __len__(self):
+        return int(np.ceil(len(self.df) / float(self.batch_size)))
+
+    def __getitem__(self, idx):
+        batch_df = self.df.iloc[self.indices[idx * self.batch_size:(idx + 1) * self.batch_size]]
+        # Prepare input data
+        encoded_data = encode_df(batch_df, col=self.col, libcol=self.libcol, 
+                                 output_col=self.output_col, variable_len=True,
+                                 tis_col=self.tis_col)
+        # Feed input
+        inputs = [encoded_data["seq"], encoded_data["library"]]
+        for key in self.extra_keys:
+            inputs.append(encoded_data[key])
+        if self.output_col is None:
+            return inputs
+        else:
+            return (inputs, encoded_data["rl"])
+            
+    def on_epoch_end(self):
+        'Updates indices after each epoch'
+        self.indices = np.arange(len(self.df))
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+    
+    
 def build_tis_score_dict(path="../Data/TIS/tis_efficiencies_aug.tsv", seq_col="sequence", score_col="efficiency", replace_u=True):
     tis_df = pd.read_csv(path, sep='\t')
     if replace_u:
@@ -236,7 +294,8 @@ def check_layer(model, data, layer_names, node=0):
         return_dict[name] = check_fn([data["val_input"]["seq"], data["val_input"]["indicator"]])
     return return_dict
 
-def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=1000, add_tis=False):
+def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=1000, add_tis=False, extra_keys=[],
+                        alphabet=["A","C","T","G"], remove_stops=False):
     if kozak:
         out_df = pd.DataFrame({"idx": list(range(-seq_length, -8, 1)), "in_frame": [i % 3 == 0 for i in range(-seq_length, -8, 1)]})
     else:
@@ -244,11 +303,17 @@ def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=100
     predictions = []
     for i in range(samples):
          # Make a random sequence
-        seq = ''.join(random.choices(["A","C","T","G"], k=seq_length))
+        seq = ''.join(random.choices(alphabet, k=seq_length))
         # Remove existing atg
         atg_present = [m.start() for m in re.finditer('ATG', seq)]
         for idx in atg_present:
-            seq = seq[:idx] + ''.join(random.choices(["C","T","G"], k=3)) + seq[idx+3:]
+            seq = seq[:idx] + "C" + ''.join(random.choices(["C","T","G"], k=2)) + seq[idx+3:]
+        if remove_stops:
+            stop_present = [m.start() for m in re.finditer('TGA', seq)] + \
+                           [m.start() for m in re.finditer('TAA', seq)] + \
+                           [m.start() for m in re.finditer('TAG', seq)]
+            for idx in stop_present:
+                seq = seq[:idx] + "C" + ''.join(random.choices(["C","G","A"], k=2)) + seq[idx+3:]                  
         # Iterate over all possible atg/kozak locations
         uAUG_seqs = []
         if kozak:
@@ -264,8 +329,13 @@ def check_uAUG_detection(trained_model, kozak=False, seq_length=200, samples=100
                 uAUG_seqs.append(new_seq)
             df = pd.DataFrame({"utr": uAUG_seqs, "library":"egfp_unmod_1"})
         # Predict
+        if add_tis:
+            df["utr"] = df["utr"] + "ATGGG"
         data = encode_df(df, output_col=None)
-        predictions.append(trained_model.predict([data["seq"], data["library"]]))
+        inputs = [data["seq"], data["library"]]
+        for key in extra_keys:
+            inputs.append(data[key])
+        predictions.append(trained_model.predict(inputs))
     #get average prediction
     out_df["prediction"] = (sum(predictions)/samples).reshape(-1)
     return out_df
