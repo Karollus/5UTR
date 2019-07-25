@@ -20,7 +20,8 @@ import seaborn as sns
 nuc_dict = {'a':[1.0,0.0,0.0,0.0],'c':[0.0,1.0,0.0,0.0],'g':[0.0,0.0,1.0,0.0], 'u':[0.0,0.0,0.0,1.0], 't':[0.0,0.0,0.0,1.0], 'n':[0.0,0.0,0.0,0.0], 'x':[1/4,1/4,1/4,1/4]}
 
 # Dictionary encoding the experiments
-experiment_dict = {"egfp_unmod_1":0, "egfp_unmod_2": 1, "mcherry_1":2, "mcherry_2":3, "ga": 4, "human":5} 
+experiment_dict = {"egfp_unmod_1":0, "egfp_unmod_2": 1, "mcherry_1":2, "mcherry_2":3, "ga": 4, "human":5,
+                  "doudna":6}
 
 def encode_seq(seq, max_len=0):
     length = len(seq)
@@ -31,9 +32,9 @@ def encode_seq(seq, max_len=0):
     one_hot = np.array([nuc_dict[x] for x in seq]) # get stacked on top of each other
     return one_hot
 
-def encode_experiment(df, col="library"):
+def encode_experiment(df, col="library", n_libs=6):
     mask = np.array([experiment_dict[x] for x in df[col]])
-    indicator = np.zeros((len(df),6))
+    indicator = np.zeros((len(df),n_libs))
     indicator[np.arange(len(df)), mask] = 1
     return indicator
 
@@ -50,12 +51,15 @@ def build_canonical_kozak_indicator(length, n):
     utr = np.flip(utr)
     return np.repeat(utr[np.newaxis,:],n,axis=0)[:,:,np.newaxis]
 
-def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=False, tis_col=None):
+def encode_df(df, col='utr', libcol="library", n_libs=6,
+              output_col="rl", variable_len=False, tis_col=None,
+             cds_col=None, utr3_col=None):
     max_len = 0
     if variable_len:
         max_len = len(max(df[col], key=len))
     one_hot = np.stack(df[col].apply(encode_seq, max_len=max_len), axis = 0)
-    indicator = encode_experiment(df, col=libcol)
+    indicator = encode_experiment(df, col=libcol, n_libs=n_libs)
+    # Output column
     rl = None
     if output_col is not None:
         rl = np.array(df[output_col])
@@ -64,7 +68,20 @@ def encode_df(df, col='utr', libcol="library", output_col="rl", variable_len=Fal
         tis_one_hot = np.stack([encode_seq(x) for x in df[tis_col]])
     frame = build_frame(one_hot.shape[1], one_hot.shape[0])
     kozak = build_canonical_kozak_indicator(one_hot.shape[1], one_hot.shape[0])
-    return {"seq":one_hot, "library":indicator, "tis":tis_one_hot, "frame":frame, "kozak":kozak, "rl":rl}
+    # Encdoe whether it is endogenous
+    seqtype = 1 - np.sum(indicator[:,:6], axis=1)
+    # Encode CDS
+    cds_seq = None
+    if cds_col is not None:
+        max_len = len(max(df[cds_col], key=len))
+        cds_seq = np.stack(df[cds_col].apply(encode_seq, max_len=max_len), axis = 0)
+    # Encode 3utr
+    utr3_seq = None
+    if utr3_col is not None:
+        max_len = len(max(df[utr3_col], key=len))
+        utr3_seq = np.stack(df[utr3_col].apply(encode_seq, max_len=max_len), axis = 0)
+    return {"seq":one_hot, "library":indicator, "tis":tis_one_hot, "frame":frame, "kozak":kozak, "rl":rl,
+           "seqtype": seqtype, "cds_seq":cds_seq, "utr3_seq":utr3_seq}
 
 def extract_tis(df, downstream_nt=6, upstream_nt=2, utr_col="utr", cds_col="CDS_Sequence", new_col="tis", attach_to_utr=False): 
     # extract upstream
@@ -85,12 +102,15 @@ def extract_tis(df, downstream_nt=6, upstream_nt=2, utr_col="utr", cds_col="CDS_
 # Generator class for input data (useful to batch small sequences to prevent insane padding)
 class DataSequence(Sequence):
     
-    def __init__(self, df, col="utr", libcol="library", 
+    def __init__(self, df, col="utr", libcol="library", n_libs=6,
                  output_col="rl", 
-                 tis_col="tis", 
+                 tis_col="tis",
+                 cds_col=None, utr3_col=None,
                  extra_keys=[], batch_size=128, shuffle=True):
         self.df = df
         self.col, self.libcol, self.output_col, self.tis_col = col, libcol, output_col, tis_col
+        self.n_libs = n_libs
+        self.cds_col, self.utr3_col = cds_col, utr3_col
         self.extra_keys = extra_keys
         self.indices = np.arange(len(self.df))
         self.batch_size = batch_size
@@ -104,7 +124,9 @@ class DataSequence(Sequence):
         batch_df = self.df.iloc[self.indices[idx * self.batch_size:(idx + 1) * self.batch_size]]
         # Prepare input data
         encoded_data = encode_df(batch_df, col=self.col, libcol=self.libcol, 
+                                 n_libs=self.n_libs,
                                  output_col=self.output_col, variable_len=True,
+                                 cds_col=self.cds_col, utr3_col=self.utr3_col,
                                  tis_col=self.tis_col)
         # Feed input
         inputs = [encoded_data["seq"], encoded_data["library"]]

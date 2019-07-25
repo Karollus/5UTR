@@ -1,8 +1,12 @@
 *.csv
 *.tsv
 *.fasta
+*.bed
 *.pkl
 *.ipynb_checkpoints
 *.pyc
+*.npy
 *.h5
 !basic_model_scaled.h5
+*.svg
+*.png

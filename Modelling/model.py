@@ -68,14 +68,14 @@ def global_avg_pool_masked(input_tensors):
     mask = K.expand_dims(mask, axis=2)
     return K.sum(tensor, axis=1)/K.sum(mask, axis=1)
 
-def convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size, suffix, 
+def convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size, suffix, prefix="",
                       padding="causal", dilation=1, batchnorm=False,
                      layer_list=[]):
     convolution = Conv1D(filters=n_filters, kernel_size=kernel_size, dilation_rate=dilation, activation='relu', 
-                           padding=padding, name="convolution_"+suffix)
+                           padding=padding, name=prefix+"convolution_"+suffix)
     layer_list.append(convolution)
     conv_features = convolution(conv_features)
-    conv_features = Lambda(apply_pad_mask, name="apply_pad_mask_"+suffix)([conv_features, pad_mask]) # Mask padding
+    conv_features = Lambda(apply_pad_mask, name=prefix+"apply_pad_mask_"+suffix)([conv_features, pad_mask]) # Mask padding
     if batchnorm:
         conv_features = BatchNormalization(axis=2, name="batchnorm_"+suffix)(conv_features)
     return conv_features, layer_list
@@ -111,17 +111,18 @@ def create_model_masked_bordered(n_conv_layers=3,
             conv_features = inception_block(conv_features, pad_mask, n_filters, suffix=str(i))   
         else:
             conv_features, layer_list = convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size[i], 
-                                                          suffix=str(i), padding=padding, dilation=dilations[i], 
+                                                          suffix=str(i), padding=padding, 
+                                                          dilation=dilations[i], 
                                                           batchnorm=use_batchnorm, layer_list=layer_list)   
         if skip_connections == "residual" and i > 0:
             conv_features = Add(name="add_residual_"+str(i))([conv_features, conv_features_shortcut])
         elif skip_connections == "dense":
-            conv_features = Concatenate(axis=-1, name="concat_dense_"+str(i))([conv_features, conv_features_shortcut])
+            conv_features = Concatenate(axis=-1, name="concat_dense_"+str(i))([conv_features,
+                                                                               conv_features_shortcut])
     # Scanning
     if use_scanning:
         conv_features = Conv1D(filters=1, kernel_size=1, activation=None, 
                            padding=padding, name="scanning_convolution")(conv_features)
-        #conv_features = Lambda(lambda x: K.squeeze(x, axis=2), name="channel_reduction_dim_remove")(conv_features)
         conv_features = LogNonhomogenousGeometric(name="scanning")(conv_features)
     # Frame based masking    
     frame_masked_features = FrameSliceLayer(name="frame_masking")(conv_features)
@@ -131,7 +132,8 @@ def create_model_masked_bordered(n_conv_layers=3,
     avg_pooling = Lambda(global_avg_pool_masked, name="pool_avg_frame_conv")
     pooled_features = pooled_features + \
                     [max_pooling(frame_masked_features[i]) for i in range(len(frame_masked_features))] + \
-                    [avg_pooling([frame_masked_features[i], pad_mask]) for i in range(len(frame_masked_features))]
+                    [avg_pooling([frame_masked_features[i], pad_mask]) for i in 
+                     range(len(frame_masked_features))]
     pooled_features = Concatenate(axis=-1, name="concatenate_pooled")(pooled_features)
     # Add tis_context if necessary
     if tis_input:
@@ -184,7 +186,8 @@ def create_model_recurrent(n_conv_layers=3,
             conv_features = inception_block(conv_features, pad_mask, n_filters, suffix=str(i))   
         else:
             conv_features, layer_list = convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size[i],  
-                                                          suffix=str(i), padding=padding, dilation=dilations[i], 
+                                                          suffix=str(i), padding=padding, 
+                                                          dilation=dilations[i], 
                                                           batchnorm=use_batchnorm)   
         if skip_connections == "residual" and i > 0:
             conv_features = Add(name="add_residual_"+str(i))([conv_features, conv_features_shortcut])
@@ -211,7 +214,8 @@ def create_model_recurrent(n_conv_layers=3,
             if skip_connections:
                 conv_history_shortcut = conv_features #shortcut connections
             if use_inception:
-                conv_history = inception_block(conv_history, pad_mask, n_filters_postrnn, suffix="post_rnn_"+str(i))   
+                conv_history = inception_block(conv_history, pad_mask, n_filters_postrnn,
+                                               suffix="post_rnn_"+str(i))   
             else:
                 conv_history, layer_list = convolve_and_mask(conv_history, pad_mask, 
                                                              n_filters_postrnn,
@@ -229,7 +233,8 @@ def create_model_recurrent(n_conv_layers=3,
         avg_pooling = Lambda(global_avg_pool_masked, name="pool_avg_frame_conv")
         pooled_features = pooled_features + \
                     [max_pooling(frame_masked_features[i]) for i in range(len(frame_masked_features))] + \
-                    [avg_pooling([frame_masked_features[i], pad_mask]) for i in range(len(frame_masked_features))]
+                    [avg_pooling([frame_masked_features[i], pad_mask]) for i in 
+                     range(len(frame_masked_features))]
         pooled_features = Concatenate(axis=-1, name="concatenate_pooled")(pooled_features)
         predict = pooled_features
     else:
@@ -248,4 +253,3 @@ def create_model_recurrent(n_conv_layers=3,
     adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     model.compile(loss=loss, optimizer=adam)
     return model
-
