@@ -63,12 +63,13 @@ def framed_pooled_conv_model(n_conv_layers=3,
             predict = Dropout(rate=fc_drop_rate, name=prefix+"fc_dropout_"+str(i))(predict)
         if single_output:
             predict = Dense(1, name=prefix+"mrl_output_unscaled")(predict) 
-        return input_seq, predict
+        return [input_seq], predict
     return conv_inner
 
 def pooled_conv_model(n_conv_layers=3, 
                         kernel_size=[8,8,8], n_filters=128, dilations=[1, 1, 1],
                         padding="same", use_batchnorm=False,
+                        only_maxpool=True,
                         use_inception=False, skip_connections="",
                         n_dense_layers=1, fc_neurons=[64], fc_drop_rate=0.2,
                         single_output=True,
@@ -100,9 +101,11 @@ def pooled_conv_model(n_conv_layers=3,
                                                                                    conv_features_shortcut])
         # Pooling
         max_pooling = GlobalMaxPooling1D(name=prefix+"pool_max_conv")(conv_features)
-        avg_pooling = Lambda(global_avg_pool_masked, name=prefix+"pool_avg_conv")([conv_features, pad_mask])
-        pooled_features = [max_pooling, avg_pooling]
-        pooled_features = Concatenate(axis=-1, name=prefix+"concatenate_pooled")(pooled_features)
+        if not only_maxpool:
+            avg_pooling = Lambda(global_avg_pool_masked, name=prefix+"pool_avg_conv")(
+                [conv_features, pad_mask])
+            pooled_features = [max_pooling, avg_pooling]
+            pooled_features = Concatenate(axis=-1, name=prefix+"concatenate_pooled")(pooled_features)
         # Prediction (Dense layer)
         predict = pooled_features
         for i in range(n_dense_layers):
@@ -110,20 +113,50 @@ def pooled_conv_model(n_conv_layers=3,
             predict = Dropout(rate=fc_drop_rate, name=prefix+"fc_dropout_"+str(i))(predict)
         if single_output:
             predict = Dense(1, name=prefix+"mrl_output_unscaled")(predict) 
-        return input_seq, predict
+        return [input_seq], predict
     return conv_inner
 
-def kmer_linear_model(input_dim, prefix=""):
+def model_input(shape, name):
+    return Input(shape=shape, name=name)
+
+def kmer_linear_model(kmer_inputs,
+                      n_kmer_layers=0,
+                      kmer_activations=["relu"]
+                      kmer_neurons=[64],
+                      kmer_drop_rate=0.2,
+                      single_output=False,
+                      prefix=""):
     def kmer_inner():
         # Input
-        input_kmer = Input(shape=(input_dim,), name=prefix+"input_kmer")
-        # Linear model
-        kmer_pred = Dense(1, name=prefix+"kmer_model")(input_kmer)
-        return input_kmer, kmer_pred
+        kmer_predict = Concatenate(axis = -1, name=prefix+"combine_kmer_inputs")(kmer_inputs)
+        # Kmer layers
+        for i in range(n_kmer_layers):
+            kmer_predict = Dense(fc_neurons[i], activation='relu', name=prefix+"fc_"+str(i))
+            (kmer_predict)
+            kmer_predict = Dropout(rate=fc_drop_rate, name=prefix+"fc_drop_"+str(i))(kmer_predict)
+        if single_output:
+            kmer_predict = Dense(1, name=prefix+"kmer_out_")(kmer_predict) 
+        return kmer_inputs, kmer_predict
     return kmer_inner
 
-def transfer_input(shape, name):
-    return Input(shape=shape, name=name)
+def combined_conv_kmer(conv_model, kmer_model,
+                      n_combine_layers=0,
+                      combine_neurons=[64],
+                      kmer_drop_rate=0.2,
+                      prefix=""):
+    def combined_inner():
+        conv_inputs, conv_output = conv_model()
+        kmer_inputs, kmer_output = kmer_model()
+        combined_predict = Concatenate(axis = -1, name=prefix+"combine_conv_kmer")(
+            [conv_output, kmer_output])
+        # Kmer layers
+        for i in range(n_combine_layers):
+            combined_predict = Dense(fc_neurons[i], activation='relu', name=prefix+"fc_convkmer"+str(i))
+            (combined_predict)
+            combined_predict = Dropout(rate=fc_drop_rate, name=prefix+"drop_convkmer"+str(i))(kmer_predict)
+        return conv_inputs + kmer_inputs, combined_predict
+    return combined_inner
+        
 
 def transfer_model(utr5_model, cds_model, utr3_model,
                    transfer_inputs,
@@ -155,7 +188,7 @@ def transfer_model(utr5_model, cds_model, utr3_model,
         output_combined = Dropout(rate=combine_drop_rate, name="combine_drop"+str(i))(output_combined)
     mrl_prediction = Dense(1, name="output")(output_combined)
     """ Model """
-    inputs = [input_5utr, input_cds, input_3utr] + transfer_inputs
+    inputs = input_5utr + input_cds + input_3utr + transfer_inputs
     model = Model(inputs=inputs, outputs=mrl_prediction)
     adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     model.compile(loss=loss, optimizer=adam)
@@ -163,7 +196,7 @@ def transfer_model(utr5_model, cds_model, utr3_model,
 
 
 
-############################################################################
+#######################################################################################################
 
 def scaling_regression_unit(mrl_prediction, input_library):
     # Scaling regression
