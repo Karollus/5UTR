@@ -1,0 +1,11 @@
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+1	93297626	rs376208311	C	A	30	PASS	Diamond_Blackfan_anemia
+1	209975361	CR022509	T	A	30	PASS	Van_der_Woude_syndrome
+2 	96931137	rs121908813	G	A	30	PASS	Pheochromocytoma
+3	98312358	rs867711777	C	T	30	PASS	Hereditary_coproporphyria
+5	147211193	rs367798627	G	A	30	PASS	Hereditary_pancreatitis
+7  	19157207	30040876_1  	G	T	30	PASS	Saethre_Chotzen_syndrome
+7  	19157225	30040876_2  	C	A	30	PASS	Saethre_Chotzen_syndrome
+9	21974860	rs1800586	C	A	30	PASS	Melanoma
+11	5248280	rs34704828	C	T 	30	PASS	beta_Thalassemia
+17	66508599	CR023224	G	A	30	PASS	Carney_complex_type_1

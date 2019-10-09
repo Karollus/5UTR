@@ -1,0 +1,100 @@
+type: Dataset
+args:
+    intervals_file:
+        doc: > 
+            bed3+<columns> file path containing bed3 and at least one column specifying the strand
+            and at least one column specifying the id.
+            Additional columns are (currently) ignored. Must be sorted
+        example:
+            url: https://zenodo.org/record/3374833/files/gencodev19_5utr_sorted_noprefix.bed?download=1
+            md5: a4b313f2edd9b8bc9769d9bf50e74555
+    fasta_file:
+        doc: Reference genome FASTA file path
+        example:
+            url: https://zenodo.org/record/3374833/files/Homo_sapiens.GRCh37.74.dna.chromosome.22.fa?download=1
+            md5: aa2bbce4da48357f9f05c2e63baacb69
+    vcf_file:
+        doc: >
+            bgzipped vcf file with the variants that are to be investigated. 
+            Must be sorted and tabix index present.
+            Filter out any variants with non-DNA symbols!
+        example:
+            url: https://zenodo.org/record/3374833/files/chr22utrVar1000gen_sorted.vcf.gz?download=1
+            md5: 35d831cb162d84b2944abd33a2344b1f
+    vcf_file_tbi:
+        doc: tabix index of vcf (just to make kipoi tests work)
+        example:
+            url: https://zenodo.org/record/3374833/files/chr22utrVar1000gen_sorted.vcf.gz.tbi?download=1
+            md5: 34707a49ece104fc67f55c0ee9cdf63a
+    chr_order_file:
+        doc: >
+            file specifying the chromosome order (genome/faidx file), if not alphanumeric
+            This must be consistent across vcf and bed file (fasta can deviate)
+        example:
+            url: https://zenodo.org/record/3374833/files/chrom_order_noprefix.txt?download=1
+            md5: d7f7d3c6912c8687578ccb30805a76b5 
+    strand_column:
+        doc: the column (1-based) specifying the strand (column 6 in a standard bed file)
+    id_column:
+        doc: the column (1-based) where seq-id information can be found (column 4 in standard bed)
+    num_chr:
+        doc: >
+            Specify whether chromosome names are numeric or have chr prefix
+            (true if numeric, false if with prefix). Must be consistent across all files!
+        example: True
+
+defined_as: dataloader.py::StrandedSequenceVariantDataloader
+
+dependencies:
+  conda:
+    - bioconda::pybedtools
+    - numpy>=1.16.2
+    - pandas>=0.24.2
+  pip:
+    - kipoiseq
+
+info:
+    doc: >
+        Dataloader for a combination of fasta, bgzip compressed vcf and bed3+ input files, 
+        where a specific user-specified column (>3, 1-based) of the bed denotes the strand
+        and a specific user-specified column (>3, 1-based) of the bed denotes the transcript id
+        (or some other id that explains which exons in the bed belong together to form one utr). 
+        Additionally, a file can be provided that defines the chromosome order, if it is
+        not alphanumeric (or lexicographic in case there is no chr prefix). 
+        The ordering specified in this file must be valid for vcf and bed!
+        All columns of the bed, except the first three, the id and the strand, are ignored. 
+        The bed and vcf must both be sorted (by position) and a tabix index must be present.
+        (must lie in the same directory and have the same name + .tbi)
+        The num_chr flag indicates whether chromosomes are lited numerically or with a chr prefix.
+        This must be consistent across all input files!
+        The dataloader finds all intervals in the bed which contain at least one varianst in the vcf.
+        It then joins intervals belonging to the same transcript, as specified by the id, to a single utr.
+        For these utr, it extracts the reference sequence from the fasta file, 
+        injects the applicable variants and reverse complements according to the strand information.
+        Returns the reference sequence and variant sequence as 
+        np.array([reference_sequence, variant_sequence]). 
+        Region metadata is additionally provided
+
+output_schema:
+    inputs:
+        name: seq
+        shape: (2,)
+        doc: Reference sequence and variant sequence, as string
+        associated_metadata: ranges, variants
+    metadata:
+        id:
+            type: str
+            doc: Id, e.g. ensembl transcript id
+        chr:
+            type: str
+            doc: chromosome
+        exon_positions:
+            type: str
+            doc: List of exon intervals that form utr
+        strand:
+            type: str
+            doc: Strand of the utr
+        variants:
+            type: str
+            doc: String representation of inserted variants
+               

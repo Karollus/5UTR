@@ -106,6 +106,8 @@ def pooled_conv_model(n_conv_layers=3,
                 [conv_features, pad_mask])
             pooled_features = [max_pooling, avg_pooling]
             pooled_features = Concatenate(axis=-1, name=prefix+"concatenate_pooled")(pooled_features)
+        else:
+            pooled_features = max_pooling
         # Prediction (Dense layer)
         predict = pooled_features
         for i in range(n_dense_layers):
@@ -121,7 +123,7 @@ def model_input(shape, name):
 
 def kmer_linear_model(kmer_inputs,
                       n_kmer_layers=0,
-                      kmer_activations=["relu"]
+                      kmer_activations=["relu"],
                       kmer_neurons=[64],
                       kmer_drop_rate=0.2,
                       single_output=False,
@@ -131,7 +133,7 @@ def kmer_linear_model(kmer_inputs,
         kmer_predict = Concatenate(axis = -1, name=prefix+"combine_kmer_inputs")(kmer_inputs)
         # Kmer layers
         for i in range(n_kmer_layers):
-            kmer_predict = Dense(fc_neurons[i], activation='relu', name=prefix+"fc_"+str(i))
+            kmer_predict = Dense(fc_neurons[i], activation=kmer_activations[i], name=prefix+"fc_"+str(i))
             (kmer_predict)
             kmer_predict = Dropout(rate=fc_drop_rate, name=prefix+"fc_drop_"+str(i))(kmer_predict)
         if single_output:
@@ -166,7 +168,8 @@ def transfer_model(utr5_model, cds_model, utr3_model,
                    n_combine_layers=0,
                    combine_neurons=[64],
                    combine_drop_rate=0.2,
-                   loss='mean_squared_error'):
+                   loss='mean_squared_error',
+                   lr=0.001):
     # Get 5utr motives
     input_5utr, motives_5utr = utr5_model()
     # Combine with existing
@@ -190,7 +193,7 @@ def transfer_model(utr5_model, cds_model, utr3_model,
     """ Model """
     inputs = input_5utr + input_cds + input_3utr + transfer_inputs
     model = Model(inputs=inputs, outputs=mrl_prediction)
-    adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
+    adam = keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     model.compile(loss=loss, optimizer=adam)
     return model
 
