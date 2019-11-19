@@ -4,6 +4,7 @@
 *.tsv
 !tis_efficiencies_aug.tsv
 !tis_efficiencies_nonaug.tsv
+!kipoi/TestFiles/hg19_idmap.tsv
 *.vcf
 *.vcf.gz
 *.vcf.gz.tbi
@@ -11,6 +12,8 @@
 *.fai
 *.fasta
 *.bed
+!kipoi/TestFiles/gencodev19_5utr_sorted.bed
+!kipoi/TestFiles/gencodev19_5utr_sorted_noprefix.bed
 *.gtf
 *.energy
 *.seq
@@ -26,3 +29,4 @@
 *.svg
 *.png
 kipoi/5UTR_Model/downloaded
+kipoi/5UTR_Model/model

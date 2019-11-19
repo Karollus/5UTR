@@ -1,8 +1,8 @@
 defined_as: model.UTRVariantEffectModel
 args:
-  weights: 
-     url: https://zenodo.org/record/3374833/files/utr_model_avgpool.h5?download=1
-     md5: 1bac703c830d6322dbace78721b1e405
+  weights: model/Framepool_combined_residual.h5
+     # url: https://zenodo.org/record/3374833/files/utr_model_avgpool.h5?download=1
+     # md5: 1bac703c830d6322dbace78721b1e405
 
 default_dataloader: .
 

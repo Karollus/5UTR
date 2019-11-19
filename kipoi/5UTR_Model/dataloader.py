@@ -178,6 +178,11 @@ class StrandedSequenceVariantDataloader(Dataset):
             "STR": "%s:%s:%s:['%s']" % (variant.CHROM, str(variant.POS),
                                        variant.REF, variant.ALT[0])
         }
+
+    
+    
+    
+    
     
 """    def __del__(self):
         for file in self.tmp_files:

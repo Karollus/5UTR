@@ -34,6 +34,7 @@ class UTRVariantEffectModel(BaseModel):
             self.weights = weights
             self.model = load_model(weights, custom_objects={'FrameSliceLayer': FrameSliceLayer})
         
+        # One-hot encodes a particular sequence
         def encode_seq(self, seq, max_len):
             # Add padding:
             if max_len == 0:
@@ -50,7 +51,8 @@ class UTRVariantEffectModel(BaseModel):
                                  Possible cause: a variant in the vcf file is defined by tag (<..>). \
                                  If so, please filter'.format(str(e), seq))
             return one_hot
-       
+        
+        # One-hot encodes the entire tensor
         def encode(self, inputs):
             # One Hot Encode input
             max_len = len(max(inputs, key=len))
@@ -58,6 +60,7 @@ class UTRVariantEffectModel(BaseModel):
                                 for seq in inputs],  axis = 0)
             return one_hot
         
+        # Predicts for a batch of inputs
         def predict_on_batch(self, inputs):
             if inputs.shape == (2,):
                 inputs = inputs[np.newaxis, :]
@@ -65,6 +68,9 @@ class UTRVariantEffectModel(BaseModel):
             max_len = len(max(inputs, key=len))
             one_hot_ref =  self.encode(inputs[:,0])
             one_hot_alt = self.encode(inputs[:,1])
+            # Construct dummy library indicator
+            indicator = np.zeros((inputs.shape[0],2))
+            indicator[:,1] = 1
             # Compute fold change for all three frames
             fc_changes = []
             for shift in range(3):
@@ -72,8 +78,8 @@ class UTRVariantEffectModel(BaseModel):
                     shifter = np.zeros((one_hot_ref.shape[0],1,4))
                     one_hot_ref = np.concatenate([one_hot_ref, shifter], axis=1)
                     one_hot_alt = np.concatenate([one_hot_alt, shifter], axis=1)
-                pred_ref = self.model.predict_on_batch(one_hot_ref).reshape(-1)
-                pred_variant = self.model.predict_on_batch(one_hot_alt).reshape(-1)
+                pred_ref = self.model.predict_on_batch([one_hot_ref, indicator]).reshape(-1)
+                pred_variant = self.model.predict_on_batch([one_hot_alt, indicator]).reshape(-1)
                 fc_changes.append(np.log2(pred_variant/pred_ref))
             # Return
             return {"mrl_fold_change":fc_changes[0], 
