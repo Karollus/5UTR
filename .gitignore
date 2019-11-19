@@ -26,6 +26,7 @@
 *.npy
 *.h5
 !Models/*.h5
+!kipoi/5UTR_Model/model/*.h5
 *.svg
 *.png
 kipoi/5UTR_Model/downloaded
