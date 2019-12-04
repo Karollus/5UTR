@@ -143,7 +143,7 @@ class StrandedSequenceVariantDataloader(Dataset):
             else:
                 var_seq = self.vcf_extractor.extract(interval, variants=variants,
                     anchor=0, fixed_len=False)
-                var_string = ";".join([self.variant_to_dict(var)["STR"] for var in variants])
+                var_string = ";".join([str(var) for var in variants])
 
                 ref_exons.append(ref_seq)
                 var_exons.append(var_seq)
