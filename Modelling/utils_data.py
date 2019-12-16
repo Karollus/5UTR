@@ -44,7 +44,60 @@ class SeqLenExtractor(PrecomputeFunction):
         
     def __call__(self, df):
         return df[self.seq_col].str.len()
+    
+class SeqCounterExtractor(PrecomputeFunction):
+    
+    def __init__(self, seq_col, new_col):
+        self.seq_col = seq_col
+        super().__init__(new_col, dims=(1,), method="pad_stack")
+        
+    def count(self, seq):
+        length = len(seq)
+        return np.flip(np.arange(1, length+1))/length
+    
+    def __call__(self, df):
+        return df[self.seq_col].apply(self.count)
 
+# Finds a pattern in the sequece and computes a mask
+class RegexPosExtractor(PrecomputeFunction):
+    
+    def __init__(self, seq_col, new_col, pattern="A[TU]G", offset=1):
+        self.seq_col = seq_col
+        self.pattern = pattern
+        super().__init__(new_col, dims=(1,), method="pad_stack")
+        
+    def find(self, seq):
+        indices = [m.start()+offset for m in re.finditer(self.pattern, seq)]
+        indicator = np.zeros((len(seq)))
+        indicator[indices] = 1
+        return indicator
+        
+    def __call__(self, df):
+        return df[self.seq_col].apply(self.find)
+
+# Records which frames are "stopped", i.e. lead to a stop codon
+class StoppedFramesExtractor(PrecomputeFunction):
+    
+    def __init__(self, seq_col, new_col):
+        self.seq_col = seq_col
+        self.pattern = "[TU][GA]A|[TU]A[GA]"
+        super().__init__(new_col, dims=(1,), method="pad_stack")
+        
+    def find(self, seq):
+        indices = [m.start()+1 for m in re.finditer(self.pattern, seq)]
+        within_stop = set()
+        for idx in indices:
+            within_stop.add(idx)
+            while idx >= 3:
+                idx = idx - 3
+                within_stop.add(idx)
+        indicator = np.zeros((len(seq)))
+        indicator[list(within_stop)] = 1
+        return indicator
+        
+    def __call__(self, df):
+        return df[self.seq_col].apply(self.find)
+    
 
 # Extracts kmers
 class KmerExtractor(PrecomputeFunction):
@@ -204,19 +257,46 @@ class DataFrameExtractor(EncodingFunction):
             return np.array(df[self.col])
         elif self.method == "stack":
             return np.stack(df[self.col], axis = 0)
+        elif self.method == "pad_stack":
+            max_len = len(max(df[self.col], key=len))
+            col_list = []
+            for vector in df[self.col]:
+                if len(vector) < max_len:
+                    vector = np.concatenate([np.zeros(max_len - len(vector)), vector])
+                col_list.append(vector)
+            return np.stack(col_list, axis = 0)
         else:
             return np.concatenate(list(df[self.col]), axis = 0)
         
 class OneHotEncoder(EncodingFunction):
-    
+
     def __init__(self, col, min_len=None):
         self.col = col
         self.min_len = min_len
+        self.nuc_dict = {'a':[1.0,0.0,0.0,0.0],'c':[0.0,1.0,0.0,0.0],'g':[0.0,0.0,1.0,0.0], 
+                         'u':[0.0,0.0,0.0,1.0], 't':[0.0,0.0,0.0,1.0], 
+                         'n':[0.0,0.0,0.0,0.0], 'x':[1/4,1/4,1/4,1/4]}
         super().__init__(col)
+        
+
+        
+    def encode_seq(self, seq, max_len=0):
+        length = len(seq)
+        if max_len > 0 and self.min_len is None:
+            padding_needed = max_len - length
+            seq = "N"*padding_needed + seq
+        if self.min_len is not None:
+            if len(seq) < self.min_len:
+                seq = "N"*(self.min_len - len(seq)) + seq
+            if len(seq) > self.min_len:
+                seq = seq[(len(seq) - self.min_len):]
+        seq = seq.lower()
+        one_hot = np.array([self.nuc_dict[x] for x in seq]) # get stacked on top of each other
+        return one_hot
     
     def __call__(self, df):
         max_len = len(max(df[self.col], key=len))
-        return np.stack([utils.encode_seq(seq, max_len, min_len = self.min_len) 
+        return np.stack([self.encode_seq(seq, max_len) 
                          for seq in df[self.col]], axis = 0)
     
 class FrameEncoder(EncodingFunction):
@@ -225,10 +305,14 @@ class FrameEncoder(EncodingFunction):
         self.col = col
         super().__init__(col)
     
+    def build_frame(self, length, n):
+        frame = np.flip(np.arange(0, length))
+        frame = np.transpose(np.array([((frame + shift) % 3 == 0).astype(int) for shift in range(3)]))
+        return np.repeat(frame[np.newaxis,:,:],n,axis=0)
+    
     def __call__(self, df):
         max_len = len(max(df[self.col], key=len))
-        return utils.build_frame(max_len, len(df))  
-    
+        return self.build_frame(max_len, len(df))
 
 class LibraryEncoder(EncodingFunction):
     

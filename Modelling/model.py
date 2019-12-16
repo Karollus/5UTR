@@ -13,7 +13,7 @@ class LogNonhomogenousGeometric(Layer):
         super().__init__(**kwargs)    
 
     def build(self, input_shape):
-        super().build(input_shape)  # Be sure to call this at the end
+        super().build(input_shape)
     
     def call(self, x):
         log_P = tf.log_sigmoid(x)
@@ -49,6 +49,8 @@ class FrameSliceLayer(Layer):
         return [frame_1, frame_2, frame_3]
     
     def compute_output_shape(self, input_shape):
+        if len(input_shape) == 2:
+            return [(input_shape[0], None),(input_shape[0], None),(input_shape[0], None)]
         return [(input_shape[0], None, input_shape[2]),(input_shape[0], None, input_shape[2]),(input_shape[0], None, input_shape[2])]
     
 # Masking to prevent zero padding to influence results
@@ -95,14 +97,20 @@ def create_frame_slice_model(n_conv_layers=3,
                         n_dense_layers=1, fc_neurons=[64], fc_drop_rate=0.2,
                         only_max_pool=False,
                         loss='mean_squared_error',
-                        use_scaling_regression=False, library_size=6,
-                        use_scanning=False):
+                        use_counter_input=False,
+                        use_scaling_regression=False, library_size=6):
     # Inputs
     input_seq = Input(shape=(None, 4), name="input_seq")
     inputs = input_seq
     conv_features = input_seq
     # Compute presence of zero padding
     pad_mask = Lambda(compute_pad_mask, name="compute_pad_mask")(conv_features)
+    # Hasan-track
+    if use_counter_input:
+        input_counter = Input(shape=(None, ), name="input_counter")
+        inputs = [input_seq, input_counter]
+        counter = Lambda(lambda x: K.expand_dims(x, axis=2), name="dim_expand")(input_counter)
+        conv_features = Concatenate(axis=-1, name="concat_counter")([conv_features, counter])
     # Convolution
     layer_list = []
     for i in range(n_conv_layers):
@@ -121,13 +129,9 @@ def create_frame_slice_model(n_conv_layers=3,
         elif skip_connections == "dense":
             conv_features = Concatenate(axis=-1, name="concat_dense_"+str(i))([conv_features,
                                                                                conv_features_shortcut])
-    # Scanning
-    if use_scanning:
-        conv_features = Conv1D(filters=1, kernel_size=1, activation=None, 
-                           padding=padding, name="scanning_convolution")(conv_features)
-        conv_features = LogNonhomogenousGeometric(name="scanning")(conv_features)
     # Frame based masking    
     frame_masked_features = FrameSliceLayer(name="frame_masking")(conv_features)
+    frame_masked_pad_mask = FrameSliceLayer(name="frame_masking_padmask")(pad_mask)
     # Pooling
     pooled_features = []
     max_pooling = GlobalMaxPooling1D(name="pool_max_frame_conv")
@@ -135,7 +139,7 @@ def create_frame_slice_model(n_conv_layers=3,
     pooled_features = pooled_features + \
                     [max_pooling(frame_masked_features[i]) for i in range(len(frame_masked_features))]
     if not only_max_pool:
-        pooled_features = pooled_features + [avg_pooling([frame_masked_features[i], pad_mask]) for i in 
+        pooled_features = pooled_features + [avg_pooling([frame_masked_features[i], frame_masked_pad_mask[i]]) for i in 
                      range(len(frame_masked_features))]
     pooled_features = Concatenate(axis=-1, name="concatenate_pooled")(pooled_features)
     # Add tis_context if necessary

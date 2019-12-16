@@ -1,9 +1,15 @@
+Modelling/uORF_Track.ipynb
+Modelling/model_combined.py
+Modelling/model_uORF.py
+Data/All_Variants/PrepareVariationData.ipynb
 *.csv
 !gencodev19_5utr_seq.csv
 !gencodev19_5utr_pos.csv
+!gencodev19_5utr_lof.bed
 *.tsv
 !tis_efficiencies_aug.tsv
 !tis_efficiencies_nonaug.tsv
+!Calvo_disease.tsv
 !kipoi/TestFiles/hg19_idmap.tsv
 *.vcf
 *.vcf.gz

@@ -65,7 +65,7 @@ info:
         All columns of the bed, except the first three, the id and the strand, are ignored. 
         The bed and vcf must both be sorted (by position) and a tabix index must be present.
         (must lie in the same directory and have the same name + .tbi)
-        The num_chr flag indicates whether chromosomes are lited numerically or with a chr prefix.
+        The num_chr flag indicates whether chromosomes are listed numerically or with a chr prefix.
         This must be consistent across all input files!
         The dataloader finds all intervals in the bed which contain at least one varianst in the vcf.
         It then joins intervals belonging to the same transcript, as specified by the id, to a single utr.
