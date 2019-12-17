@@ -5,7 +5,6 @@ Data/All_Variants/PrepareVariationData.ipynb
 *.csv
 !gencodev19_5utr_seq.csv
 !gencodev19_5utr_pos.csv
-!gencodev19_5utr_lof.bed
 *.tsv
 !tis_efficiencies_aug.tsv
 !tis_efficiencies_nonaug.tsv
@@ -18,6 +17,7 @@ Data/All_Variants/PrepareVariationData.ipynb
 *.fai
 *.fasta
 *.bed
+!gencodev19_5utr_lof.bed
 !kipoi/TestFiles/gencodev19_5utr_sorted.bed
 !kipoi/TestFiles/gencodev19_5utr_sorted_noprefix.bed
 *.gtf
