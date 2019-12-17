@@ -13,9 +13,9 @@ import pandas as pd
 import scipy.stats as stats
 import ahocorasick
 
-from keras.utils import Sequence
+import concise
 
-import utils
+from keras.utils import Sequence
 
 class EncodingFunction:
 
@@ -36,6 +36,7 @@ class PrecomputeFunction(EncodingFunction):
         
 ### Precomputation functions ###
 
+# Computes the sequence length
 class SeqLenExtractor(PrecomputeFunction):
     
     def __init__(self, seq_col, new_col):
@@ -44,12 +45,13 @@ class SeqLenExtractor(PrecomputeFunction):
         
     def __call__(self, df):
         return df[self.seq_col].str.len()
-    
+
+# Counts along the sequence (e.g. gives a sequence 1,2,3,4,5,...)
 class SeqCounterExtractor(PrecomputeFunction):
     
     def __init__(self, seq_col, new_col):
         self.seq_col = seq_col
-        super().__init__(new_col, dims=(1,), method="pad_stack")
+        super().__init__(new_col, dims=(None,), method="pad_stack")
         
     def count(self, seq):
         length = len(seq)
@@ -57,6 +59,17 @@ class SeqCounterExtractor(PrecomputeFunction):
     
     def __call__(self, df):
         return df[self.seq_col].apply(self.count)
+
+# Precomputes the secondary structure
+class SecondaryStructureComputer(PrecomputeFunction):
+    
+    def __init__(self, seq_col, new_col):
+        self.seq_col = seq_col
+        super().__init__(new_col, dims=(None,), method="stack")
+    
+    def __call__(self, df):
+        return concise.encodeRNAStructure(seq_vec, maxlen=None, seq_align='end', W=240, L=160, U=1, tmpdir='/tmp/RNAplfold/')
+    
 
 # Finds a pattern in the sequece and computes a mask
 class RegexPosExtractor(PrecomputeFunction):
@@ -98,7 +111,6 @@ class StoppedFramesExtractor(PrecomputeFunction):
     def __call__(self, df):
         return df[self.seq_col].apply(self.find)
     
-
 # Extracts kmers
 class KmerExtractor(PrecomputeFunction):
     

@@ -1,7 +1,9 @@
 Modelling/uORF_Track.ipynb
+Modelling/Nonaug_analysis.ipynb
 Modelling/model_combined.py
 Modelling/model_uORF.py
 Data/All_Variants/PrepareVariationData.ipynb
+Data/RawData/list.txt
 *.csv
 !gencodev19_5utr_seq.csv
 !gencodev19_5utr_pos.csv

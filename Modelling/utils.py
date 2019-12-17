@@ -14,6 +14,66 @@ from keras.utils import Sequence
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+import utils_data
+
+outputval_names = {"doudna": "rl_mean", "andreev":"log_load", "pcr3":"log_load", "eichhorn":"log_load",
+                  "ptr":"ptr", "wilhelm":"ptr"}
+
+# Function to compute correlations
+def compute_corrs(df, model, one_hot_fn, key, extra_encoding_fn=[]):
+    generator = utils_data.DataSequence(df, encoding_functions=[one_hot_fn] + extra_encoding_fn, 
+                                                shuffle=False)
+    predict = model.predict_generator(generator, verbose=0)
+    return {"corr":(stats.pearsonr(predict.reshape(-1), df[outputval_names[key]]), 
+                               stats.spearmanr(predict.reshape(-1), df[outputval_names[key]])),
+            "pred":predict}
+
+# Function to compute all test metrics
+def compute_all_test_metrics(data_dict, model, min_len=None, extra_encoding_fn=[],
+                             noTG = False,
+                            postproc_mean=5.58621521, postproc_sd=1.34657403):
+    result_dict = {}
+    one_hot_fn = utils_data.OneHotEncoder("utr", min_len=min_len)
+    # Test sets
+    data_df = data_dict["mpra"]
+    if noTG:
+        data_df = data_df[~(data_df.utr.str[0:2] == "TG")]
+    for key in ['egfp_unmod_1', 'mcherry_1', 'mcherry_2', 'egfp_unmod_2', 'human']:
+        df = data_df[(data_df.library == key) & (data_df.set == "test")]
+        generator = utils_data.DataSequence(df, encoding_functions=[one_hot_fn] + extra_encoding_fn, shuffle=False)
+        predict = model.predict_generator(generator, verbose=0)
+        if key == "egfp_unmod_1":
+            result_dict[key] = (rSquared(predict.reshape(-1), df["rl"]), pearson_r(predict.reshape(-1), df["rl"])[0])
+        else:
+            result_dict[key] = pearson_r(predict.reshape(-1), df["rl"])[0]
+    varlen_df = data_dict["varlen_mpra"]
+    for key in ['random', 'human']:
+        df = varlen_df[(varlen_df.library == key) & (varlen_df.set == "test")]
+        generator = utils_data.DataSequence(df, encoding_functions=[one_hot_fn] + extra_encoding_fn, shuffle=False)
+        predict = model.predict_generator(generator, verbose=0)
+        if key == "random":
+            result_dict[key] = (rSquared(predict.reshape(-1), df["rl"]), pearson_r(predict.reshape(-1), df["rl"])[0])
+        if key == "human":
+            result_dict["human_varlen"] = pearson_r(predict.reshape(-1), df["rl"])[0]
+    # SNV
+    df = data_dict["snv"]
+    one_hot_fn_mother = utils_data.OneHotEncoder("mother", min_len=min_len)
+    gen_wt = utils_data.DataSequence(df, encoding_functions=[one_hot_fn_mother] + extra_encoding_fn, shuffle=False)
+    predict_wt = model.predict_generator(gen_wt, verbose=0)
+    gen_snv = utils_data.DataSequence(df, encoding_functions=[one_hot_fn] + extra_encoding_fn, shuffle=False)
+    predict_snv = model.predict_generator(gen_snv, verbose=0)
+    if min_len is not None:
+        predict_wt = predict_wt * postproc_sd + postproc_mean
+        predict_snv = predict_snv * postproc_sd + postproc_mean
+    log_pred_diff = np.log2(predict_snv/predict_wt)
+    result_dict["snv"] = pearson_r(log_pred_diff.reshape(-1), df["log_obs_diff"])[0]
+    # Endogenous data
+    for key in ["doudna", "andreev", "pcr3", "eichhorn", "ptr", "wilhelm"]:
+        result_dict[key] = compute_corrs(data_dict[key], model, one_hot_fn, key, extra_encoding_fn=extra_encoding_fn)["corr"]
+    return result_dict
+
+
+
 """ FEATURE ENCODING """
 
 # Dictionary returning one-hot encoding of nucleotides 
