@@ -217,3 +217,70 @@ def create_model_recurrent(n_conv_layers=3,
     adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     model.compile(loss=loss, optimizer=adam)
     return model
+
+def create_standard_conv_model(n_conv_layers=3, 
+                        kernel_size=[8,8,8], n_filters=128, dilations=[1, 1, 1],
+                        padding="causal", use_batchnorm=False,
+                        conv_dropout=[0.0, 0.0, 0.0],
+                        use_inception=False, skip_connections="", 
+                        n_dense_layers=1, fc_neurons=[64], fc_drop_rate=0.2,
+                        only_max_pool=False,
+                        loss='mean_squared_error',
+                        use_counter_input=False,
+                        use_scaling_regression=False, library_size=6):
+    # Inputs
+    input_seq = Input(shape=(None, 4), name="input_seq")
+    inputs = input_seq
+    conv_features = input_seq
+    # Compute presence of zero padding
+    pad_mask = Lambda(compute_pad_mask, name="compute_pad_mask")(conv_features)
+    # Hasan-track
+    if use_counter_input:
+        input_counter = Input(shape=(None, ), name="input_counter")
+        inputs = [input_seq, input_counter]
+        counter = Lambda(lambda x: K.expand_dims(x, axis=2), name="dim_expand")(input_counter)
+        conv_features = Concatenate(axis=-1, name="concat_counter")([conv_features, counter])
+    # Convolution
+    layer_list = []
+    for i in range(n_conv_layers):
+        if skip_connections:
+            conv_features_shortcut = conv_features #shortcut connections
+        if use_inception:
+            conv_features = inception_block(conv_features, pad_mask, n_filters, suffix=str(i))   
+        else:
+            conv_features = convolve_and_mask(conv_features, pad_mask, n_filters, kernel_size[i], 
+                                                          suffix=str(i), padding=padding, 
+                                                          dilation=dilations[i], 
+                                                          batchnorm=use_batchnorm,
+                                                          conv_dropout=conv_dropout[i])   
+        if skip_connections == "residual" and i > 0:
+            conv_features = Add(name="add_residual_"+str(i))([conv_features, conv_features_shortcut])
+        elif skip_connections == "dense":
+            conv_features = Concatenate(axis=-1, name="concat_dense_"+str(i))([conv_features,
+                                                                               conv_features_shortcut])
+    # Pooling
+    pooled_features = []
+    max_pooling = GlobalMaxPooling1D(name="pool_max_frame_conv")
+    avg_pooling = Lambda(global_avg_pool_masked, name="pool_avg_frame_conv")
+    pooled_features = pooled_features + [max_pooling(conv_features)]
+    if not only_max_pool:
+        pooled_features = pooled_features + [avg_pooling([conv_features, pad_mask])]
+    concat_features = Concatenate(axis=-1, name="concatenate_pooled")(pooled_features)
+    # Prediction (Dense layer)
+    predict = concat_features
+    for i in range(n_dense_layers):
+        predict = Dense(fc_neurons[i], activation='relu', name="fully_connected_"+str(i))(predict)
+        predict = Dropout(rate=fc_drop_rate, name="fc_dropout_"+str(i))(predict)
+    predict = Dense(1, name="mrl_output_unscaled")(predict) 
+    # Scaling regression
+    if use_scaling_regression:
+        input_experiment = Input(shape=(library_size, ), name="input_experiment")
+        predict = Lambda(interaction_term, name="interaction_term")([predict, input_experiment])
+        predict = Concatenate(axis = 1, name="prepare_regression")([predict, input_experiment])
+        predict = Dense(1, name="scaling_regression", use_bias=False)(predict)
+        inputs = [inputs] + [input_experiment]
+    """ Model """
+    model = Model(inputs=inputs, outputs=predict)
+    adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
+    model.compile(loss=loss, optimizer=adam)
+    return model

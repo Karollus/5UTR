@@ -34,6 +34,8 @@ Data/GTF/
 *.pyc
 *.npy
 *.h5
+*.hdf5
+*.joblib
 !Models/*.h5
 !kipoi/5UTR_Model/model/*.h5
 *.svg

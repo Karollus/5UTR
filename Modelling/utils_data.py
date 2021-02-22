@@ -140,6 +140,37 @@ class KmerExtractor(PrecomputeFunction):
     def __call__(self, df):
         return df[self.seq_col].apply(self.extract)
 
+# Extracts kmers for each frame
+class FramedKmerExtractor(PrecomputeFunction):
+    
+    def __init__(self, seq_col, new_col, k, jump=False, divide_counts=True):
+        self.k = k
+        self.seq_col = seq_col
+        kmers = [''.join(i) for i in itertools.product(["A","C","T","G"], repeat = self.k)]
+        self.n = len(kmers)
+        self.kmer_dict = {kmers[k]:k for k in range(self.n)}
+        self.jump = jump
+        self.divide_counts = divide_counts
+        super().__init__(new_col, dims=(self.n*3,))
+    
+    def extract(self, seq):
+        i = 1
+        arrays = [np.zeros(self.n), np.zeros(self.n), np.zeros(self.n)]
+        while i <= len(seq) - (self.k - 1):
+            j = len(seq) - (self.k - 1) - i
+            arrays[i % 3][self.kmer_dict[seq[j:j+self.k]]] = arrays[i % 3][self.kmer_dict[seq[j:j+self.k]]] + 1
+            if self.jump:
+                i = i + self.k
+            else:
+                i += 1
+        arr = np.concatenate(arrays)
+        if self.divide_counts:
+            arr/np.sum(arr)
+        return arr
+
+    def __call__(self, df):
+        return df[self.seq_col].apply(self.extract)    
+    
 # Extracts kmers at specific positions (e.g. start or end of sequence)
 class KmerAtPosExtractor(PrecomputeFunction):
 

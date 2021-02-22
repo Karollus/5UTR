@@ -72,7 +72,22 @@ def compute_all_test_metrics(data_dict, model, min_len=None, extra_encoding_fn=[
         result_dict[key] = compute_corrs(data_dict[key], model, one_hot_fn, key, extra_encoding_fn=extra_encoding_fn)["corr"]
     return result_dict
 
-
+# Code to run a prediction on MPRA data
+def predict_on_MPRA(model, data_dict, varlen = False, library = "egfp_unmod_1", min_len = None,
+                    extra_encoding_fn=[], postproc_mean=5.58621521, postproc_sd=1.34657403):
+    one_hot_fn = utils_data.OneHotEncoder("utr", min_len=min_len)
+    if varlen:
+        data_df = data_dict["varlen_mpra"].copy()
+    else:
+        data_df = data_dict["mpra"].copy()
+    df = data_df[(data_df.library == library) & (data_df.set == "test")]
+    generator = utils_data.DataSequence(df, encoding_functions=[one_hot_fn] + extra_encoding_fn, shuffle=False)
+    predict = model.predict_generator(generator, verbose=0)
+    if min_len is not None:
+        predict = predict * postproc_sd + postproc_mean
+    df["pred"] = predict.reshape(-1)
+    df = df.rename(columns={"pred": "Predicted MRL", "rl": "Observed MRL"})
+    return df
 
 """ FEATURE ENCODING """
 
