@@ -6,7 +6,7 @@ However, the published model, due to its use of a dense layer in the architectur
 
 We show that such a model can provide similar performance as the published fixed-length on the same test set, while generalizing better to other contexts, such as longer MPRA sequences and endogenous data. We also show that the model has learnt to detect functionally relevant nucleotides and can correctly quantify the relative strength of uTIS motifs.
 
-To replicate the main results, clone the repository. Next download the data from [Placeholder]. Place the data_dict.pkl in the Data directory. Then uncompress the All_Variants.tar.gz and place the contents in the All_Variants directory. Then you can run the Modelling.ipynb notebook to replicate the results.
+To replicate the main results, clone the repository. Next download the data from https://doi.org/10.5281/zenodo.3584237. Place the data_dict.pkl in the Data directory. Then you can run the Model_Training.ipynb notebook to train a Framepool model. If you would like to generate the paper plots, without running predictions, place the contents of the Predictions.tar.gz file in Data/Predictions and then run the Validations.ipynb notebook. 
 
 In case you want to use the model to predict on your own, you can use the kipoi API. The kipoi_example.ipynb notebook in the Kipoi directory provides an example for how this can be done.
 
